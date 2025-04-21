@@ -11,10 +11,10 @@ app.use(cors());
 
 // Connexion à la base de données MySQL
 const db = mysql.createConnection({
-    host: '127.0.0.1', // Adresse du serveur MySQL
-    user: '', // Nom d'utilisateur MySQL
-    password: '', // Mot de passe MySQL
-    database: '', // Nom de la base de données
+    host: '127.0.0.1',
+    user: 'Axb521@',
+    password: 'bmk7w7e458395',
+    database: 'projethiver',
 });
 
 // Vérifier si la connexion à la base de données est réussie
@@ -100,30 +100,35 @@ app.post('/register', async (req, res) => {
 
 // Route pour créer un emprunt
 app.post('/emprunt', async (req, res) => {
-    const { id_user, materielle, date_emprunt } = req.body;
+    const { id_user, materielle } = req.body;
 
-    if (!id_user || !materielle || !date_emprunt) {
+    if (!id_user || !materielle) {
         return res.status(400).json({ message: 'Tous les champs sont requis.' });
     }
 
-    try {
-        db.query('INSERT INTO emprunt (id_user, materielle, date_emprunt) VALUES (?, ?, ?)', 
-        [id_user, materielle, date_emprunt], (err, result) => {
-            if (err) {
-                console.error(err);
-                return res.status(500).json({ message: 'Erreur interne du serveur' });
-            }
+    const date_emprunt = new Date().toISOString().split('T')[0]; // Format: YYYY-MM-DD
 
-            res.status(201).json({ 
-                message: 'Emprunt créé avec succès',
-                emprunt: {
-                    id: result.insertId,
-                    id_user,
-                    materielle,
-                    date_emprunt
+    try {
+        db.query(
+            'INSERT INTO emprunt (id_user, materielle, date_emprunt) VALUES (?, ?, ?)', 
+            [id_user, materielle, date_emprunt], 
+            (err, result) => {
+                if (err) {
+                    console.error(err);
+                    return res.status(500).json({ message: 'Erreur interne du serveur' });
                 }
-            });
-        });
+
+                res.status(201).json({ 
+                    message: 'Emprunt créé avec succès',
+                    emprunt: {
+                        id: result.insertId,
+                        id_user,
+                        materielle,
+                        date_emprunt
+                    }
+                });
+            }
+        );
     } catch (err) {
         console.error(err);
         res.status(500).json({ message: 'Erreur interne du serveur' });
@@ -149,13 +154,23 @@ app.get('/emprunt/:id_user', async (req, res) => {
 
         let query, params;
 
-        // Si admin (rôle = 1), récupérer tous les emprunts
         if (role === 1) {
-            query = 'SELECT e.id, u.username, e.materielle, e.date_emprunt FROM emprunt e JOIN users u ON e.id_user = u.id;';
+            // Admin : récupérer tous les emprunts avec nom du matériel
+            query = `
+                SELECT e.id, u.username, m.Nom AS nom_materiel, e.date_emprunt
+                FROM emprunt e
+                JOIN users u ON e.id_user = u.id
+                JOIN materiel m ON e.materielle = m.id;
+            `;
             params = [];
         } else {
-            // Sinon, récupérer les emprunts de l'utilisateur spécifique
-            query = 'SELECT id, materielle, date_emprunt FROM emprunt WHERE id_user = ?';
+            // Utilisateur : récupérer ses emprunts avec nom du matériel
+            query = `
+                SELECT e.id, m.Nom AS nom_materiel, e.date_emprunt
+                FROM emprunt e
+                JOIN materiel m ON e.materielle = m.id
+                WHERE e.id_user = ?;
+            `;
             params = [id_user];
         }
 
@@ -168,11 +183,29 @@ app.get('/emprunt/:id_user', async (req, res) => {
     }
 });
 
-// Route pour supprimer un emprunt
-app.delete('/emprunt/:id', async (req, res) => {
-    const { id } = req.params;
+
+// Suppression d’un emprunt uniquement autorisée pour les admins
+app.delete('/emprunt/:id/:idUser', async (req, res) => {
+    const { id, idUser } = req.params;
 
     try {
+        // Vérifier le rôle de l'utilisateur
+        const [userRows] = await db.promise().query(
+            'SELECT role FROM users WHERE id = ?',
+            [idUser]
+        );
+
+        if (userRows.length === 0) {
+            return res.status(404).json({ message: "Utilisateur non trouvé." });
+        }
+
+        const isAdmin = userRows[0].role === 1;
+
+        if (!isAdmin) {
+            return res.status(403).json({ message: "Suppression réservée aux administrateurs." });
+        }
+
+        // Supprimer l'emprunt
         const [results] = await db.promise().query(
             'DELETE FROM emprunt WHERE id = ?',
             [id]
@@ -183,12 +216,82 @@ app.delete('/emprunt/:id', async (req, res) => {
         }
 
         return res.status(200).json({ message: "Emprunt supprimé avec succès." });
+
     } catch (err) {
         console.error(err);
         res.status(500).json({ message: "Erreur interne du serveur." });
     }
 });
 
+app.post('/ajouter/:userId', async (req, res) => {
+    const { userId } = req.params;
+    const { materielle } = req.body;
+
+    if (!materielle) {
+        return res.status(400).json({ message: 'Le nom du matériel est requis.' });
+    }
+
+    try {
+        // Vérifie si l'utilisateur est admin
+        const [userRows] = await db.promise().query(
+            'SELECT role FROM users WHERE id = ?',
+            [userId]
+        );
+
+        if (userRows.length === 0) {
+            return res.status(404).json({ message: 'Utilisateur non trouvé.' });
+        }
+
+        if (userRows[0].role !== 1) {
+            return res.status(403).json({ message: 'Accès refusé : administrateur requis.' });
+        }
+
+        // Insère le matériel
+        await db.promise().query(
+            'INSERT INTO materiel (nom) VALUES (?)',
+            [materielle]
+        );
+
+        res.status(200).json({ message: 'Matériel ajouté avec succès.' });
+    } catch (error) {
+        console.error('Erreur serveur :', error);
+        res.status(500).json({ message: 'Erreur serveur.' });
+    }
+});
+
+app.post('/updateMdp', async (req, res) => {
+    const { id, password } = req.body;
+
+    if (!id || !password) {
+        return res.status(400).json({ message: 'Tous les champs sont requis.' });
+    }
+
+    try {
+        // Hacher le nouveau mot de passe
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Mettre à jour le mot de passe dans la base de données
+        await db.promise().query(
+            'UPDATE users SET password = ? WHERE id = ?',
+            [hashedPassword, id]
+        );
+
+        res.status(200).json({ message: 'Mot de passe mis à jour avec succès.' });
+    } catch (error) {
+        console.error('Erreur serveur :', error);
+        res.status(500).json({ message: 'Erreur serveur.' });
+    }
+} );
+
+app.get('/materiels', async (req, res) => {
+    try {
+        const [results] = await db.promise().query('SELECT id, Nom FROM materiel');
+        res.status(200).json(results);
+    } catch (err) {
+        console.error('Erreur lors de la récupération des matériels:', err);
+        res.status(500).json({ message: "Erreur serveur lors de la récupération des matériels." });
+    }
+});
 
 // Lancer le serveur
 app.listen(PORT, () => {
