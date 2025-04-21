@@ -11,10 +11,7 @@ app.use(cors());
 
 // Connexion à la base de données MySQL
 const db = mysql.createConnection({
-    host: '127.0.0.1',
-    user: 'Axb521@',
-    password: 'bmk7w7e458395',
-    database: 'projethiver',
+    
 });
 
 // Vérifier si la connexion à la base de données est réussie
@@ -292,6 +289,56 @@ app.get('/materiels', async (req, res) => {
         res.status(500).json({ message: "Erreur serveur lors de la récupération des matériels." });
     }
 });
+
+app.delete('/supprimer/:userId', async (req, res) => {
+    const { userId } = req.params;
+    const { materielle } = req.body;
+
+    if (!materielle) {
+        return res.status(400).json({ message: 'Nom du matériel requis.' });
+    }
+
+    try {
+        // Vérification admin
+        const [userRows] = await db.promise().query(
+            'SELECT role FROM users WHERE id = ?',
+            [userId]
+        );
+
+        if (userRows.length === 0) {
+            return res.status(404).json({ message: 'Utilisateur non trouvé.' });
+        }
+
+        if (userRows[0].role !== 1) {
+            return res.status(403).json({ message: 'Accès refusé : administrateur requis.' });
+        }
+
+        // Vérifier si le matériel existe
+        const [matRows] = await db.promise().query(
+            'SELECT id FROM materiel WHERE nom = ?',
+            [materielle]
+        );
+
+        if (matRows.length === 0) {
+            return res.status(404).json({ message: 'Matériel introuvable.' });
+        }
+
+        const idMateriel = matRows[0].id;
+
+        // Supprimer le matériel
+        await db.promise().query(
+            'DELETE FROM materiel WHERE id = ?',
+            [idMateriel]
+        );
+
+        res.status(200).json({ message: 'Matériel supprimé avec succès.' });
+
+    } catch (error) {
+        console.error('Erreur lors de la suppression :', error);
+        res.status(500).json({ message: 'Erreur serveur.' });
+    }
+});
+
 
 // Lancer le serveur
 app.listen(PORT, () => {
